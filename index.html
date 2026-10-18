@@ -53,6 +53,11 @@ li.task.ready{border-left-color:var(--green);background:var(--greenbg)}
 .dep .t{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:600}
 .dep.isdone .t{text-decoration:line-through;color:var(--muted)}
 .dep small{display:block;font-weight:400;color:var(--muted)}
+.depbar{display:flex;gap:6px}
+.seg{flex:1;padding:9px;border:1px solid var(--line);background:var(--surface);border-radius:10px;font-weight:700;cursor:pointer;color:var(--muted)}
+.seg.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.grp{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:6px;padding:2px 2px;font-size:15px}
+.grp small{color:var(--muted);font-weight:400}
 .waiting{font-size:14px;margin-top:8px}
 .editor{margin-top:8px;display:grid;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -451,28 +456,62 @@ td.n,th.n{text-align:right}
       '<input class="depwait" placeholder="Waiting on (person or item)" value="' + esc(t.waiting || "") + '" aria-label="Waiting on">' +
       '<button type="button" class="link depdone">Done</button></div>';
   }
+  var depView = "tasks";
+  function depCard(t){
+    var blocked = isBlocked(t), late = isLate(t);
+    return '<li class="task ' + (blocked ? "amber" : "ready") + (late ? " late" : "") + '" data-id="' + t.id + '">' +
+      '<input type="checkbox" class="tick" aria-label="Mark complete: ' + esc(t.title) + '">' +
+      '<div class="body"><div class="title">' + esc(t.title) + '</div>' +
+      '<div class="meta">' + (blocked ? "" : '<span class="st green">Ready to follow up</span>') + badge(t) + (t.project ? '<b>' + esc(t.project) + '</b>' : '') +
+      '<span class="when">' + (t.due ? (late ? "Overdue: " : "Due: ") + esc(fmt(t.due)) : "No due date") + '</span></div>' +
+      '<div class="deps">' + depsOf(t).map(function(x){
+        return '<label class="dep' + (x.done ? " isdone" : "") + '"><input type="checkbox" class="deptick" data-dep="' + x.id + '"' + (x.done ? " checked" : "") + ' aria-label="Close dependency: ' + esc(x.title) + '">' +
+          '<span class="t">' + esc(x.title) + '<small>' + (x.done ? "Closed: " + esc(fmt(x.doneAt)) : (x.due ? (isLate(x) ? "Overdue: " : "Due: ") + esc(fmt(x.due)) : "No due date")) + (x.project ? ", " + esc(x.project) : "") + '</small></span></label>';
+      }).join("") + '</div>' +
+      (t.waiting && t.waiting.trim() ? '<div class="waiting"><b>Waiting on:</b> ' + esc(t.waiting) + ' <button type="button" class="link gotit">Received</button></div>' : "") +
+      (editId === t.id ? editorHtml(t) : "") +
+      '<button type="button" class="link depedit" data-edit="' + t.id + '">' + (editId === t.id ? "Hide editor" : "Edit dependencies") + '</button>' +
+      '</div><button class="del" aria-label="Delete task" title="Delete task">\u00d7</button></li>';
+  }
   function renderDeps(match){
     var ds = depStats(state.tasks.filter(function(t){ return !t.done; }));
     var byDue = function(a, b){ return (a.due ? new Date(a.due).getTime() : Infinity) - (b.due ? new Date(b.due).getTime() : Infinity); };
-    var items = ds.blocked.sort(byDue).concat(ds.ready.sort(byDue)).filter(match);
-    var html = items.map(function(t){
-      var blocked = isBlocked(t), late = isLate(t);
-      return '<li class="task ' + (blocked ? "amber" : "ready") + (late ? " late" : "") + '" data-id="' + t.id + '">' +
-        '<input type="checkbox" class="tick" aria-label="Mark complete: ' + esc(t.title) + '">' +
-        '<div class="body"><div class="title">' + esc(t.title) + '</div>' +
-        '<div class="meta">' + (blocked ? "" : '<span class="st green">Ready to follow up</span>') + badge(t) + (t.project ? '<b>' + esc(t.project) + '</b>' : '') +
-        '<span class="when">' + (t.due ? (late ? "Overdue: " : "Due: ") + esc(fmt(t.due)) : "No due date") + '</span></div>' +
-        '<div class="deps">' + depsOf(t).map(function(x){
-          return '<label class="dep' + (x.done ? " isdone" : "") + '"><input type="checkbox" class="deptick" data-dep="' + x.id + '"' + (x.done ? " checked" : "") + ' aria-label="Close dependency: ' + esc(x.title) + '">' +
-            '<span class="t">' + esc(x.title) + '<small>' + (x.done ? "Closed: " + esc(fmt(x.doneAt)) : (x.due ? (isLate(x) ? "Overdue: " : "Due: ") + esc(fmt(x.due)) : "No due date")) + (x.project ? ", " + esc(x.project) : "") + '</small></span></label>';
-        }).join("") + '</div>' +
-        (t.waiting && t.waiting.trim() ? '<div class="waiting"><b>Waiting on:</b> ' + esc(t.waiting) + ' <button type="button" class="link gotit">Received</button></div>' : "") +
-        (editId === t.id ? editorHtml(t) : "") +
-        '<button type="button" class="link depedit" data-edit="' + t.id + '">' + (editId === t.id ? "Hide editor" : "Edit dependencies") + '</button>' +
-        '</div></li>';
+    var blocked = ds.blocked.sort(byDue).filter(match), ready = ds.ready.sort(byDue).filter(match);
+    var bar = '<li class="depbar"><button type="button" class="seg' + (depView === "tasks" ? " on" : "") + '" data-view="tasks">By task</button>' +
+      '<button type="button" class="seg' + (depView === "people" ? " on" : "") + '" data-view="people">By person</button></li>';
+    if (!blocked.length && !ready.length) return bar + '<li class="empty">No dependencies yet. Open Add task and pick a task it depends on, or tap Dependencies on any pending task.</li>';
+    if (depView === "tasks") return bar + blocked.concat(ready).map(depCard).join("");
+    var groups = {}, order = [], other = [];
+    blocked.forEach(function(t){
+      var w = (t.waiting || "").trim();
+      if (!w) { other.push(t); return; }
+      var k = w.toLowerCase();
+      if (!groups[k]) { groups[k] = { name: w, items: [] }; order.push(k); }
+      groups[k].items.push(t);
+    });
+    order.sort(function(a, b){ return groups[a].name.localeCompare(groups[b].name); });
+    var html = order.map(function(k){
+      var g = groups[k];
+      return '<li class="grp"><span><b>' + esc(g.name) + '</b> <small>' + g.items.length + (g.items.length > 1 ? " tasks" : " task") + '</small></span>' +
+        '<button type="button" class="link" data-rcv="' + esc(k) + '">All received</button></li>' + g.items.map(depCard).join("");
     }).join("");
-    return html || '<li class="empty">No dependencies yet. Open Add task and pick a task it depends on, or tap Dependencies on any pending task.</li>';
+    if (other.length) html += '<li class="grp"><span><b>Waiting on other tasks</b> <small>' + other.length + '</small></span></li>' + other.map(depCard).join("");
+    if (ready.length) html += '<li class="grp"><span><b>Ready to follow up</b> <small>' + ready.length + '</small></span></li>' + ready.map(depCard).join("");
+    return bar + html;
   }
+  $("list").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.view) { depView = b.dataset.view; renderTasks(); }
+    else if (b.dataset.rcv) {
+      var n = 0;
+      state.tasks.forEach(function(t){
+        if (!t.done && t.waiting && t.waiting.trim().toLowerCase() === b.dataset.rcv) {
+          addLog("completed", "Received: " + t.waiting + " (" + t.title + ")"); t.waiting = ""; t.u = Date.now(); n++;
+        }
+      });
+      if (n) { save(); renderAll(); }
+    }
+  });
 
   // ---------- Repeating tasks ----------
   function spawnNext(t){
